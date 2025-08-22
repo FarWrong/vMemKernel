@@ -4434,11 +4434,7 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	 * memory until all local zones are considered.
 	 */
 	alloc_flags |= alloc_flags_nofragment(ac.preferred_zoneref->zone, gfp);
-	if(!(orig_gfp & __GFP_SFL_BYPASS)){
-    	page = sfl_try_get(order, gfp);
-		if (page)
-			goto out;
-	}
+
 
 	/* First allocation attempt */
 	page = get_page_from_freelist(alloc_gfp, order, alloc_flags, &ac);

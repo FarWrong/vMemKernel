@@ -20,7 +20,7 @@
 #include <linux/swapops.h>
 #include <linux/shmem_fs.h>
 #include <linux/ksm.h>
-
+#include <linux/super_free_list.h>
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
 #include "internal.h"
@@ -1062,13 +1062,27 @@ static int alloc_charge_hpage(struct page **hpage, struct mm_struct *mm,
 		     GFP_TRANSHUGE);
 	int node = hpage_collapse_find_target_node(cc);
 	struct folio *folio;
+	bool from_sfl = false;
 
-	if (!hpage_collapse_alloc_page(hpage, gfp, node, &cc->alloc_nmask))
-		return SCAN_ALLOC_HUGE_PAGE_FAIL;
-
+/*
+        * Prefer Super Free List (2MiB order-9 compound page); fall back to
+        * the standard allocator if SFL is empty.
+        */
+       *hpage = sfl_try_get(HPAGE_PMD_ORDER, gfp);
+    if (*hpage) {
+        from_sfl = true;
+    } else {
+        if (!hpage_collapse_alloc_page(hpage, gfp, node, &cc->alloc_nmask))
+            return SCAN_ALLOC_HUGE_PAGE_FAIL;
+    }
 	folio = page_folio(*hpage);
 	if (unlikely(mem_cgroup_charge(folio, mm, gfp))) {
-		folio_put(folio);
+		if (from_sfl) {
+                /* Return page to SFL pool on charge failure */
+            	sfl_put_if_eligible(*hpage, HPAGE_PMD_ORDER);
+            } else {
+	             folio_put(folio);
+	        }
 		*hpage = NULL;
 		return SCAN_CGROUP_CHARGE_FAIL;
 	}

@@ -4,7 +4,7 @@
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
+#include <linux/super_free_list.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/sched/mm.h>
@@ -776,6 +776,7 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 	struct vm_area_struct *vma = vmf->vma;
 	gfp_t gfp;
 	struct folio *folio;
+	struct page *sfl_page;
 	unsigned long haddr = vmf->address & HPAGE_PMD_MASK;
 
 	if (!transhuge_vma_suitable(vma, haddr))
@@ -824,7 +825,10 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 		return ret;
 	}
 	gfp = vma_thp_gfp_mask(vma);
-	folio = vma_alloc_folio(gfp, HPAGE_PMD_ORDER, vma, haddr, true);
+    /* First try Super Free List for a 2MiB THP page. */
+    sfl_page = sfl_try_get(HPAGE_PMD_ORDER, gfp);
+    folio = sfl_page ? page_folio(sfl_page)
+                     : vma_alloc_folio(gfp, HPAGE_PMD_ORDER, vma, haddr, true);
 	if (unlikely(!folio)) {
 		count_vm_event(THP_FAULT_FALLBACK);
 		return VM_FAULT_FALLBACK;

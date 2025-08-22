@@ -9895,6 +9895,66 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		kvm_sched_yield(vcpu, a0);
 		ret = 0;
 		break;
+	case 15: //lmaoooo write what you want
+		u64 gpa = a0;
+		gfn_t gfn = (gfn_t)(gpa >> PAGE_SHIFT);
+		// Flags to be returned to rdx
+		unsigned long flags = 0;
+		unsigned long offset = gpa & 0xFFF;
+		unsigned long hva = gfn_to_hva(vcpu->kvm, gfn);
+		unsigned long ret;
+		unsigned long order = 0;
+		struct page *pages[1] = { NULL };
+
+		if (!hva) {
+				printk(KERN_ERR "Invalid HVA: %lx\n", hva);
+				ret = -EFAULT;
+				break;
+		}
+
+
+		unsigned long base_va = hva & PAGE_MASK;
+		//unsigned long sec_offset = hva & 0xFFF;
+		hva = offset;
+		ret = get_user_pages_remote(vcpu->kvm->mm, base_va, 1, FOLL_GET, pages, NULL);
+		if (ret <= 0) {
+				printk(KERN_ERR "Failed to get user pages, ret: %ld\n", ret);
+				ret = -EFAULT;
+				break;
+		}
+
+		struct page *page = pages[0];
+		if (!page) {
+		printk(KERN_ERR "Failed to retrieve page structure\n");
+		ret = -EFAULT;
+		break;
+		}
+
+		// Check if page is mapped
+		if (page_mapped(page)) {
+		flags |= (1 << 1);
+		}
+
+		// Check if page is a huge page and its order
+		if (PageHuge(page) || PageTransHuge(page) || PageCompound(page)) {
+		flags |= (1 << 0);
+		order = folio_order(page_folio(page));
+		if (order > 31) {
+			order = 31;
+		}
+		flags |= ((order & 0x1F) << 2);
+		} 
+
+		unsigned long pfn = page_to_pfn(page);
+		phys_addr_t phys_base = PFN_PHYS(pfn);
+		//phys_addr_t exact_phys = phys_base | sec_offset;
+
+		put_page(page);
+
+		kvm_rdx_write(vcpu,pfn);
+		kvm_rsi_write(vcpu,flags);
+		ret = (unsigned long)phys_base;
+		break;
 	case KVM_HC_MAP_GPA_RANGE: {
 		u64 gpa = a0, npages = a1, attrs = a2;
 
